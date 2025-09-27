@@ -1,0 +1,27 @@
+# Text files: keep LF in repo (Git will do CRLF on Windows checkout)
+*.py          text eol=lf
+*.sh          text eol=lf
+*.ps1         text eol=lf
+*.csv         text eol=lf
+*.tsv         text eol=lf
+*.md          text eol=lf
+*.yml         text eol=lf
+*.yaml        text eol=lf
+*.json        text eol=lf
+.gitignore    text eol=lf
+
+# Binaries: never touch line endings
+*.jpg         binary
+*.jpeg        binary
+*.png         binary
+*.webp        binary
+*.zip         binary
+*.7z          binary
+*.pdf         binary
+*.sqlite      binary
+
+# Checksum manifests are text; keep LF
+*.sha256      text eol=lf
+
+# VS Code workspace
+*.code-workspace text eol=lf
