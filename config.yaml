@@ -1,0 +1,8 @@
+roots:
+  models: "data/02_Models"
+master: "data/master_metadata.csv"
+exts: [".jpg", ".jpeg", ".png", ".webp"]
+thumbs:
+  enabled: true
+  max_side: 1600
+  quality: 88

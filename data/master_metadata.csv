@@ -1,1 +1,15 @@
-uid,style_code,color_code,title,era,acquisition_source,acquisition_date,acquisition_price,currency,condition,provenance_notes,factory_code,production_date,label_text,primary_photo,thumb_path,storage_location,capture_date,photographer,rights,uuid,sha256_manifest_path,notes
+id,filename,model,viewtype,sequence,width,height,filesize,sha256,processed_at,source,uid,sha256_manifest_path,notes
+BA2037-089_front_01_,BA2037-089_01_BA2037-089_front_01.jpeg,BA2037-089,front,1,0,0,0,,2025-09-27T05:49:00.651530+00:00,legacy_migration,BA2037-089_01_BA2037-089_front_01.jpeg,,"style_code=data/photos/BA2037-089/BA2037-089_front_01.jpeg
+color_code=BA2037-089
+title=front
+era=1
+acquisition_source=1200
+acquisition_date=1600
+acquisition_price=750948
+currency=62e9c9b32b501250ed397123cdbd1c84887ef6fc14942ac898d71a620243a3dc
+condition=2025-09-24T11:52:13.970404Z"
+BA2037-089_front_01_62e9c9b3,BA2037-089_front_01.jpeg,BA2037-089,front,01,1200,1600,953384,62e9c9b32b501250ed397123cdbd1c84887ef6fc14942ac898d71a620243a3dc,2025-09-27T06:15:19.488034+00:00,local_ingest,,C:/Users/tamir/Documents/Nike SB RPM Master Archive/data/checksums/BA2037-089.sha256,
+BA2037-089_front_02_f01a444c,BA2037-089_front_02.jpeg,BA2037-089,front,02,1200,1600,750948,f01a444c6c3524183443bac32c13f6ed31d8485505ebdad1af5236c4b2ef292f,2025-09-27T06:15:19.488034+00:00,local_ingest,,C:/Users/tamir/Documents/Nike SB RPM Master Archive/data/checksums/BA2037-089.sha256,
+BA2037-089_tag_01_f0905c52,BA2037-089_tag_01.jpeg,BA2037-089,tag,01,825,813,236244,f0905c52c37f23c85ab55d62f3cc4c7df8660fc59e4062f9d519a7b82cdd8e0c,2025-09-27T06:15:19.488034+00:00,local_ingest,,C:/Users/tamir/Documents/Nike SB RPM Master Archive/data/checksums/BA2037-089.sha256,
+BA2037-089_tag_02_fed3f1fd,BA2037-089_tag_02.jpeg,BA2037-089,tag,02,825,813,182150,fed3f1fdde8bfaca2564db6464e3eaf7361c98ba8c8a136e51108d013c49c1d7,2025-09-27T06:15:19.488034+00:00,local_ingest,,C:/Users/tamir/Documents/Nike SB RPM Master Archive/data/checksums/BA2037-089.sha256,
+BA2318-089_front_01_d09244e0,BA2318-089_front_01.jpeg,BA2318-089,front,01,1200,1600,242147,d09244e04a839b0c5b72bea1eb5e966ebf941b2e6dfcc42b647dd8b8dee260e4,2025-09-27T06:15:19.488034+00:00,local_ingest,,C:/Users/tamir/Documents/Nike SB RPM Master Archive/data/checksums/BA2318-089.sha256,
