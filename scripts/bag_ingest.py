@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-Bag Ingest + Thumbnails (MVP)
+Bag Ingest + Thumbnails + Config (MVP)
 
 Scans per-bag photo folders (default: data/02_Models/**/photos/*),
 collects metadata, and updates:
@@ -16,6 +16,7 @@ id,filename,model,viewtype,sequence,width,height,filesize,sha256,processed_at,so
 """
 
 from __future__ import annotations
+
 import argparse
 import hashlib
 import re
@@ -24,7 +25,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Tuple
 
-# --- image libs (dims + thumbs). Safe if PIL unavailable ---
+# Pillow (optional; only needed for dims/thumbs)
 try:
     from PIL import Image, ImageOps  # type: ignore
     HAVE_PIL = True
@@ -32,51 +33,59 @@ except Exception:
     HAVE_PIL = False
 
 import pandas as pd
+
 from scripts.utils.atomic_write import atomic_write_text
+from scripts.config import load_config, pick  # config.yaml loader
 
-# -------- Config ----------------------------------------------------------------
+# ----------------------- Defaults (overridable via config.yaml) ----------------
 
-EXTS = {".jpg", ".jpeg", ".png", ".webp"}  # extend if needed
+EXTS = {".jpg", ".jpeg", ".png", ".webp"}
 SCHEMA = re.compile(r"^(BA\d{4}-\d{3})_([a-z]+)_(\d{2})\.(jpg|jpeg|png|webp)$", re.I)
 
 MASTER_COLUMNS = [
-    "id","filename","model","viewtype","sequence",
-    "width","height","filesize","sha256","processed_at",
-    "source","uid","sha256_manifest_path","notes"
+    "id", "filename", "model", "viewtype", "sequence",
+    "width", "height", "filesize", "sha256", "processed_at",
+    "source", "uid", "sha256_manifest_path", "notes",
 ]
 
-# -------- Helpers ----------------------------------------------------------------
+# --------------------------------- Helpers ------------------------------------
+
 
 def sha256_file(path: Path) -> str:
     h = hashlib.sha256()
     with path.open("rb") as f:
-        for chunk in iter(lambda: f.read(1 << 20), b""):
+        for chunk in iter(lambda: f.read(1 << 20), b""):  # 1 MiB chunks
             h.update(chunk)
     return h.hexdigest()
+
 
 def get_dims(path: Path) -> Tuple[int, int]:
     if not HAVE_PIL:
         return (0, 0)
     try:
         with Image.open(path) as im:
+            im = ImageOps.exif_transpose(im)
             return int(im.width), int(im.height)
     except Exception:
         return (0, 0)
+
 
 def parse_schema(name: str) -> Tuple[str, str, int]:
     m = SCHEMA.match(name)
     if not m:
         return ("", "unknown", 0)
     model = m.group(1).upper()
-    view  = m.group(2).lower()
-    seq   = int(m.group(3))
+    view = m.group(2).lower()
+    seq = int(m.group(3))
     return (model, view, seq)
+
 
 def load_existing_master(master_csv: Path) -> pd.DataFrame:
     if master_csv.exists() and master_csv.stat().st_size > 0:
         try:
             return pd.read_csv(master_csv)
         except Exception:
+            # safeguard: don't crash if the CSV is temporarily corrupt
             bkp = master_csv.with_suffix(".corrupt.bak")
             try:
                 master_csv.replace(bkp)
@@ -84,6 +93,7 @@ def load_existing_master(master_csv: Path) -> pd.DataFrame:
                 pass
             return pd.DataFrame(columns=MASTER_COLUMNS)
     return pd.DataFrame(columns=MASTER_COLUMNS)
+
 
 def ensure_checksums_append(model: str, root: Path, files_with_hashes: List[Tuple[Path, str]]) -> str:
     """
@@ -111,7 +121,8 @@ def ensure_checksums_append(model: str, root: Path, files_with_hashes: List[Tupl
         try:
             rel_txt = p_abs.relative_to(root).as_posix()
         except ValueError:
-            rel_txt = p_abs.as_posix()  # different drive / out of tree
+            # Different drive / outside repo: store absolute path
+            rel_txt = p_abs.as_posix()
         rows.append(f"{h}  {rel_txt}\n")
 
     if rows:
@@ -136,16 +147,16 @@ def ensure_checksums_append(model: str, root: Path, files_with_hashes: List[Tupl
 
     return out.as_posix()
 
-# --- thumbnails ---------------------------------------------------------------
 
 def make_thumb(src: Path, dst: Path, max_side: int, quality: int) -> bool:
     """
-    Create/refresh a thumbnail for `src` at `dst`.
+    Create/refresh thumbnail for `src` at `dst`.
     Skips if dst is already up-to-date (mtime check).
     Returns True if a thumbnail was created/updated.
     """
     if not HAVE_PIL:
         return False
+
     dst.parent.mkdir(parents=True, exist_ok=True)
     try:
         if dst.exists() and dst.stat().st_mtime >= src.stat().st_mtime:
@@ -166,12 +177,16 @@ def make_thumb(src: Path, dst: Path, max_side: int, quality: int) -> bool:
         elif ext == ".png":
             im.save(dst, "PNG", optimize=True)
         else:
+            # Fallback: write JPEG if extension is odd
             im = im.convert("RGB")
             dst = dst.with_suffix(".jpg")
             im.save(dst, "JPEG", quality=quality, optimize=True, progressive=True)
+
     return True
 
-# -------- Main -------------------------------------------------------------------
+
+# ----------------------------------- Main -------------------------------------
+
 
 def main() -> int:
     ap = argparse.ArgumentParser()
@@ -183,7 +198,44 @@ def main() -> int:
     ap.add_argument("--thumbs", action="store_true", help="Also generate thumbnails per bag")
     ap.add_argument("--thumb-max-side", type=int, default=1600, help="Thumbnail max long side")
     ap.add_argument("--thumb-quality", type=int, default=88, help="Thumbnail JPEG quality")
+    # config
+    ap.add_argument("--config", default="config.yaml", help="Path to config.yaml")
     args = ap.parse_args()
+
+    # ----- load config (CLI still wins over defaults) -----
+    cfg = load_config(args.config)
+
+    if args.root == ap.get_default("root"):
+        v = pick(cfg, "roots", "models", default=None)
+        if v:
+            args.root = v
+
+    if args.master == ap.get_default("master"):
+        v = pick(cfg, "master", default=None)
+        if v:
+            args.master = v
+
+    if args.thumbs is False:
+        v = pick(cfg, "thumbs", "enabled", default=None)
+        if isinstance(v, bool):
+            args.thumbs = v
+
+    if args.thumb_max_side == ap.get_default("thumb_max_side"):
+        v = pick(cfg, "thumbs", "max_side", default=None)
+        if isinstance(v, int):
+            args.thumb_max_side = v
+
+    if args.thumb_quality == ap.get_default("thumb_quality"):
+        v = pick(cfg, "thumbs", "quality", default=None)
+        if isinstance(v, int):
+            args.thumb_quality = v
+
+    exts_cfg = pick(cfg, "exts", default=None)
+    if isinstance(exts_cfg, list) and exts_cfg:
+        global EXTS  # update the allowed extension set
+        EXTS = {str(x).lower() for x in exts_cfg}
+
+    # --------------------------------------------------------------------------
 
     repo_root = Path(".").resolve()
     root = Path(args.root)
@@ -209,15 +261,15 @@ def main() -> int:
             if not (p.is_file() and p.suffix.lower() in EXTS):
                 continue
 
-            file_map[p.name] = p  # remember path by filename
-
+            file_map[p.name] = p
             model, view, seq = parse_schema(p.name)
             if not model:
-                # non-conforming names should have been normalized already
+                # Non-conforming names should be fixed upstream
                 continue
 
             sha = sha256_file(p)
-            # skip if sha already present
+
+            # Skip if sha already present in master
             if "sha256" in existing.columns and (existing["sha256"] == sha).any():
                 continue
 
@@ -246,7 +298,7 @@ def main() -> int:
 
     if not new_rows:
         print("No new rows to ingest. ✅")
-        # still optionally generate thumbnails if requested
+        # still optionally refresh thumbnails
         if args.thumbs:
             made = skipped = 0
             for photos_dir in root.rglob("photos"):
@@ -288,18 +340,15 @@ def main() -> int:
     combined = combined.drop_duplicates(subset=["sha256"], keep="first")
 
     # Stable sort for pleasant diffs
-    for c in ("model", "viewtype", "sequence"):
+    for c in ("model", "viewtype", "sequence", "filename"):
         if c not in combined.columns:
             combined[c] = ""
-    combined = combined.sort_values(
-        by=["model", "viewtype", "sequence", "filename"], kind="stable"
-    )
+    combined = combined.sort_values(by=["model", "viewtype", "sequence", "filename"], kind="stable")
 
     out_csv = combined.to_csv(index=False)
 
     if args.dry_run:
         print(f"[DRY] Would add {len(new_rows)} new rows; master would become {len(combined)} rows.")
-        # optional thumbs skipped in dry-run
         return 0
 
     atomic_write_text(master_csv, out_csv)
@@ -323,6 +372,7 @@ def main() -> int:
         print(f"thumbnails: created={made}, up_to_date={skipped}")
 
     return 0
+
 
 if __name__ == "__main__":
     raise SystemExit(main())
