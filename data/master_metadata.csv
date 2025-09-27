@@ -1,1 +1,10 @@
-uid,style_code,color_code,title,era,acquisition_source,acquisition_date,acquisition_price,currency,condition,provenance_notes,factory_code,production_date,label_text,primary_photo,thumb_path,storage_location,capture_date,photographer,rights,uuid,sha256_manifest_path,notes
+id,filename,model,viewtype,sequence,width,height,filesize,sha256,processed_at,source,uid,sha256_manifest_path,notes
+BA2037-089_front_01_,BA2037-089_01_BA2037-089_front_01.jpeg,BA2037-089,front,01,0,0,0,,2025-09-27T05:49:00.651530+00:00,legacy_migration,BA2037-089_01_BA2037-089_front_01.jpeg,,"style_code=data/photos/BA2037-089/BA2037-089_front_01.jpeg
+color_code=BA2037-089
+title=front
+era=1
+acquisition_source=1200
+acquisition_date=1600
+acquisition_price=750948
+currency=62e9c9b32b501250ed397123cdbd1c84887ef6fc14942ac898d71a620243a3dc
+condition=2025-09-24T11:52:13.970404Z"
