@@ -1,29 +1,35 @@
 #!/usr/bin/env python
 """
-Bag Ingest + Thumbnails + Config (MVP)
+Bag Ingest + Thumbnails + Provenance (MVP)
 
 Scans per-bag photo folders (default: data/02_Models/**/photos/*),
-collects metadata, and updates:
-  - data/checksums/<MODEL>.sha256        (idempotent append, Windows-safe)
-  - data/master_metadata.csv             (atomic rewrite, de-duped by sha256)
+collects metadata (including optional per-bag provenance files),
+updates:
+  - data/checksums/<MODEL>.sha256    (idempotent append, Windows-safe)
+  - data/master_metadata.csv         (atomic rewrite, de-duped by sha256)
 
 Optional:
-  - Generate per-bag thumbnails in .../<bag>/thumbnails/ (JPEG/PNG)
+  - Generate per-bag thumbnails in each bag's thumbnails/ folder.
 
-Filename schema assumed: BA####-###_<viewtype>_<NN>.<ext>
-Canonical master columns:
-id,filename,model,viewtype,sequence,width,height,filesize,sha256,processed_at,source,uid,sha256_manifest_path,notes
+Per-bag metadata files supported (place next to photos/, i.e. bag dir):
+  - bag_metadata.csv (preferred) with columns: filename,listing_url,seller_id,capture_date
+  - metadata.csv / metadata.json / metadata.yaml / metadata.yml
+
+Canonical master columns (including provenance):
+id,filename,model,viewtype,sequence,width,height,filesize,sha256,processed_at,
+source,uid,sha256_manifest_path,listing_url,seller_id,capture_date,notes
 """
 
 from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Any, Dict, List, Tuple
 
 # Pillow (optional; only needed for dims/thumbs)
 try:
@@ -45,7 +51,10 @@ SCHEMA = re.compile(r"^(BA\d{4}-\d{3})_([a-z]+)_(\d{2})\.(jpg|jpeg|png|webp)$", 
 MASTER_COLUMNS = [
     "id", "filename", "model", "viewtype", "sequence",
     "width", "height", "filesize", "sha256", "processed_at",
-    "source", "uid", "sha256_manifest_path", "notes",
+    "source", "uid", "sha256_manifest_path",
+    # provenance fields (optional)
+    "listing_url", "seller_id", "capture_date",
+    "notes",
 ]
 
 # --------------------------------- Helpers ------------------------------------
@@ -54,7 +63,7 @@ MASTER_COLUMNS = [
 def sha256_file(path: Path) -> str:
     h = hashlib.sha256()
     with path.open("rb") as f:
-        for chunk in iter(lambda: f.read(1 << 20), b""):  # 1 MiB chunks
+        for chunk in iter(lambda: f.read(1 << 20), b""):
             h.update(chunk)
     return h.hexdigest()
 
@@ -85,7 +94,6 @@ def load_existing_master(master_csv: Path) -> pd.DataFrame:
         try:
             return pd.read_csv(master_csv)
         except Exception:
-            # safeguard: don't crash if the CSV is temporarily corrupt
             bkp = master_csv.with_suffix(".corrupt.bak")
             try:
                 master_csv.replace(bkp)
@@ -121,7 +129,6 @@ def ensure_checksums_append(model: str, root: Path, files_with_hashes: List[Tupl
         try:
             rel_txt = p_abs.relative_to(root).as_posix()
         except ValueError:
-            # Different drive / outside repo: store absolute path
             rel_txt = p_abs.as_posix()
         rows.append(f"{h}  {rel_txt}\n")
 
@@ -177,12 +184,107 @@ def make_thumb(src: Path, dst: Path, max_side: int, quality: int) -> bool:
         elif ext == ".png":
             im.save(dst, "PNG", optimize=True)
         else:
-            # Fallback: write JPEG if extension is odd
             im = im.convert("RGB")
             dst = dst.with_suffix(".jpg")
             im.save(dst, "JPEG", quality=quality, optimize=True, progressive=True)
-
     return True
+
+
+# ---------------------------- Per-bag metadata loader --------------------------
+
+
+def load_bag_metadata(bag_dir: Path) -> Dict[str, Dict[str, str]]:
+    """
+    Look for a per-bag metadata file next to photos/:
+      - bag_metadata.csv  (preferred)
+      - metadata.csv
+      - metadata.json
+      - metadata.yaml / metadata.yml
+
+    Returns a map: filename -> { 'listing_url': ..., 'seller_id': ..., 'capture_date': ... }
+    """
+    candidates = [
+        bag_dir / "bag_metadata.csv",
+        bag_dir / "metadata.csv",
+        bag_dir / "metadata.json",
+        bag_dir / "metadata.yaml",
+        bag_dir / "metadata.yml",
+    ]
+    meta_map: Dict[str, Dict[str, str]] = {}
+    for c in candidates:
+        if not c.exists():
+            continue
+        try:
+            if c.suffix.lower() == ".csv":
+                import pandas as _pd
+                df = _pd.read_csv(c, dtype=str).fillna("")
+                for _, row in df.iterrows():
+                    fn = str(row.get("filename", "") or "")
+                    if not fn:
+                        for k in ("file_name", "path", "image_path"):
+                            if k in df.columns and row.get(k):
+                                fn = Path(str(row.get(k))).name
+                                break
+                    if not fn:
+                        continue
+                    meta_map[Path(fn).name] = {
+                        "listing_url": str(row.get("listing_url", "") or ""),
+                        "seller_id": str(row.get("seller_id", "") or ""),
+                        "capture_date": str(row.get("capture_date", "") or ""),
+                    }
+                return meta_map
+            elif c.suffix.lower() == ".json":
+                data = json.loads(c.read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    for k, v in data.items():
+                        fn = Path(k).name
+                        meta_map[fn] = {
+                            "listing_url": str(v.get("listing_url", "") or ""),
+                            "seller_id": str(v.get("seller_id", "") or ""),
+                            "capture_date": str(v.get("capture_date", "") or ""),
+                        }
+                elif isinstance(data, list):
+                    for item in data:
+                        fn = Path(str(item.get("filename", "") or "")).name
+                        if not fn:
+                            continue
+                        meta_map[fn] = {
+                            "listing_url": str(item.get("listing_url", "") or ""),
+                            "seller_id": str(item.get("seller_id", "") or ""),
+                            "capture_date": str(item.get("capture_date", "") or ""),
+                        }
+                return meta_map
+            elif c.suffix.lower() in (".yaml", ".yml"):
+                try:
+                    import yaml as _yaml
+                except Exception:
+                    continue
+                data = _yaml.safe_load(c.read_text(encoding="utf-8")) or {}
+                if isinstance(data, dict):
+                    if all(isinstance(v, dict) for v in data.values()):
+                        for k, v in data.items():
+                            fn = Path(k).name
+                            meta_map[fn] = {
+                                "listing_url": str(v.get("listing_url", "") or ""),
+                                "seller_id": str(v.get("seller_id", "") or ""),
+                                "capture_date": str(v.get("capture_date", "") or ""),
+                            }
+                        return meta_map
+                    # else try list-like shape
+                    iterable = data if isinstance(data, list) else list(data.values())
+                    for item in iterable:
+                        fn = Path(str(item.get("filename", "") or "")).name
+                        if not fn:
+                            continue
+                        meta_map[fn] = {
+                            "listing_url": str(item.get("listing_url", "") or ""),
+                            "seller_id": str(item.get("seller_id", "") or ""),
+                            "capture_date": str(item.get("capture_date", "") or ""),
+                        }
+                    return meta_map
+        except Exception:
+            continue
+    return meta_map
 
 
 # ----------------------------------- Main -------------------------------------
@@ -232,10 +334,8 @@ def main() -> int:
 
     exts_cfg = pick(cfg, "exts", default=None)
     if isinstance(exts_cfg, list) and exts_cfg:
-        global EXTS  # update the allowed extension set
+        global EXTS  # update allowed extensions set (module-level)
         EXTS = {str(x).lower() for x in exts_cfg}
-
-    # --------------------------------------------------------------------------
 
     repo_root = Path(".").resolve()
     root = Path(args.root)
@@ -257,6 +357,11 @@ def main() -> int:
     for photos_dir in root.rglob("photos"):
         if not photos_dir.is_dir():
             continue
+
+        # load optional per-bag metadata (search next to photos/ i.e., bag_dir/)
+        bag_dir = photos_dir.parent
+        bag_meta = load_bag_metadata(bag_dir)  # filename -> {listing_url, seller_id, capture_date}
+
         for p in photos_dir.iterdir():
             if not (p.is_file() and p.suffix.lower() in EXTS):
                 continue
@@ -264,12 +369,11 @@ def main() -> int:
             file_map[p.name] = p
             model, view, seq = parse_schema(p.name)
             if not model:
-                # Non-conforming names should be fixed upstream
+                # non-conforming names should have been normalized already
                 continue
 
             sha = sha256_file(p)
-
-            # Skip if sha already present in master
+            # skip if sha already present
             if "sha256" in existing.columns and (existing["sha256"] == sha).any():
                 continue
 
@@ -278,6 +382,12 @@ def main() -> int:
             processed = datetime.now(timezone.utc).isoformat()
             sha8 = sha[:8]
             _id = f"{model}_{view}_{seq:02d}_{sha8}"
+
+            # per-file provenance if available
+            file_meta = bag_meta.get(p.name, {})
+            listing_url = file_meta.get("listing_url", "")
+            seller_id = file_meta.get("seller_id", "")
+            capture_date = file_meta.get("capture_date", "")
 
             new_rows.append({
                 "id": _id,
@@ -293,12 +403,15 @@ def main() -> int:
                 "source": args.source,
                 "uid": "",
                 "sha256_manifest_path": "",
+                "listing_url": listing_url,
+                "seller_id": seller_id,
+                "capture_date": capture_date,
                 "notes": "",
             })
 
     if not new_rows:
         print("No new rows to ingest. ✅")
-        # still optionally refresh thumbnails
+        # optionally refresh/create thumbnails even if nothing new
         if args.thumbs:
             made = skipped = 0
             for photos_dir in root.rglob("photos"):

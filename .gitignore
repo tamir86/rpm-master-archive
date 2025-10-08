@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual env
+.venv/
+
+# Editors / OS
+.vscode/
+*.code-workspace
+.DS_Store
+Thumbs.db
+
+# Logs / temp
+logs/
+*.tmp.csv
+*.bak
+*.bak.csv
+
+# Generated
+data/**/thumbnails/
+data/master_metadata.pre_migrate.bak.csv
